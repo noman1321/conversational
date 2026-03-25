@@ -23,7 +23,7 @@ function mimeToExtension(mime) {
 
 const MIN_RECORD_MS = 500;
 
-export default function PushToTalkButton({ onResult, disabled }) {
+export default function PushToTalkButton({ onResult, onRecordStart, disabled }) {
   const { t } = useTranslation("common");
   const [status, setStatus] = useState("idle"); // idle | listening | processing
   const mediaRecorderRef = useRef(null);
@@ -34,6 +34,7 @@ export default function PushToTalkButton({ onResult, disabled }) {
 
   const startRecording = useCallback(async () => {
     if (disabled || status !== "idle") return;
+    onRecordStart?.();
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       streamRef.current = stream;
@@ -45,6 +46,8 @@ export default function PushToTalkButton({ onResult, disabled }) {
       const options = mimeType ? { mimeType } : {};
       const mediaRecorder = new MediaRecorder(stream, options);
       mediaRecorderRef.current = mediaRecorder;
+      // Capture actual MIME the browser chose (important on iOS)
+      const actualMime = (mediaRecorder.mimeType || mimeType || "audio/webm").split(";")[0];
 
       mediaRecorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data);
@@ -54,8 +57,7 @@ export default function PushToTalkButton({ onResult, disabled }) {
         streamRef.current?.getTracks().forEach((track) => track.stop());
         streamRef.current = null;
 
-        const mime = mimeTypeRef.current || "audio/webm";
-        const blob = new Blob(chunksRef.current, { type: mime });
+        const blob = new Blob(chunksRef.current, { type: actualMime });
         chunksRef.current = [];
 
         if (blob.size < 1000) {
@@ -63,7 +65,7 @@ export default function PushToTalkButton({ onResult, disabled }) {
           return;
         }
 
-        const ext = mimeToExtension(mime);
+        const ext = mimeToExtension(actualMime);
         setStatus("processing");
         await onResult(blob, ext);
         setStatus("idle");

@@ -1,5 +1,6 @@
 import os
 import tempfile
+from elevenlabs.client import ElevenLabs
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -27,7 +28,33 @@ if not api_key or api_key == "your_openai_api_key_here":
         "   OPENAI_API_KEY=sk-...\n"
     )
 
+elevenlabs_api_key = os.getenv("ELEVENLABS_API_KEY")
+elevenlabs_voice_female = os.getenv("ELEVENLABS_VOICE_ID_FEMALE")
+elevenlabs_voice_male = os.getenv("ELEVENLABS_VOICE_ID_MALE")
+if not elevenlabs_api_key:
+    raise RuntimeError("\n\n❌ ELEVENLABS_API_KEY is missing in your .env file.\n")
+
 client = OpenAI(api_key=api_key)
+el_client = ElevenLabs(api_key=elevenlabs_api_key)
+
+OPENAI_TTS_VOICES = {"female": "shimmer", "male": "onyx"}
+
+
+def elevenlabs_tts(text: str, gender: str = "female") -> bytes:
+    voice_id = elevenlabs_voice_male if gender == "male" else elevenlabs_voice_female
+    try:
+        audio_stream = el_client.text_to_speech.convert(
+            voice_id=voice_id,
+            text=text,
+            model_id="eleven_multilingual_v2",
+            output_format="mp3_44100_128",
+        )
+        return b"".join(audio_stream)
+    except Exception as e:
+        print(f"[ElevenLabs] error: {e} — falling back to OpenAI TTS")
+        openai_voice = OPENAI_TTS_VOICES.get(gender, "nova")
+        tts = client.audio.speech.create(model="tts-1", voice=openai_voice, input=text)
+        return tts.content
 
 _LANG = (
     "Always detect the user's language and respond in the exact same language and script. "
@@ -65,12 +92,35 @@ SYSTEM_PROMPTS = {
         "If you cannot resolve an issue, guide the user to the right next step. "
         f"{_LANG}"
     ),
+    "insurance": (
+        "You are {name}, a warm, lively, and emotionally expressive insurance sales representative from SecureLife Insurance. "
+        "You are on a live voice call with a potential customer. "
+        "Speak exactly like a real human — use natural emotional expressions freely throughout the conversation, such as: "
+        "'Oh!', 'Arrey!', 'Wah!', 'Achha achha', 'Haan bilkul!', 'Sach mein?', 'Arey waah!', 'Oh wow!', 'Of course!', 'Absolutely!', 'I totally get it', 'Hmm', 'Right right', 'You know what I mean?'. "
+        "Show genuine emotions — express surprise, excitement, empathy, and warmth naturally. "
+        "When someone shares something personal (family, health, finances), respond with real empathy: 'Oh that must be tough', 'I completely understand', 'That's really important'. "
+        "Build genuine rapport before talking about insurance. Ask about their family, current coverage, and goals — one question at a time. "
+        "When explaining products (term life, health, motor, home insurance), be simple, clear, and enthusiastic — not robotic. "
+        "Handle objections with empathy and patience. Never be pushy. "
+        "Keep every response to 2 to 3 short conversational sentences since it will be spoken aloud. "
+        "Never use bullet points, lists, numbers, or any formatting — speak naturally like a real phone call. "
+        f"{_LANG}"
+    ),
 }
 
-AVAILABLE_VOICES = {
-    "male": "onyx",
-    "female": "nova",
-}
+AGENT_NAMES = {"female": "Priya", "male": "Arjun"}
+
+def get_insurance_prompt(gender: str) -> str:
+    name = AGENT_NAMES.get(gender, "Priya")
+    return SYSTEM_PROMPTS["insurance"].format(name=name)
+
+def get_greeting(gender: str) -> str:
+    name = AGENT_NAMES.get(gender, "Priya")
+    return (
+        f"Hello! This is {name} calling from SecureLife Insurance. "
+        "How are you doing today? Do you have a couple of minutes to chat?"
+    )
+
 
 
 @app.post("/chat/voice")
@@ -92,7 +142,7 @@ async def chat_voice(
         tmp.write(audio_bytes)
         tmp_path = tmp.name
 
-    system_prompt = SYSTEM_PROMPTS.get(persona, SYSTEM_PROMPTS["general"])
+    system_prompt = get_insurance_prompt(voice) if persona == "insurance" else SYSTEM_PROMPTS.get(persona, SYSTEM_PROMPTS["general"])
 
     try:
         with open(tmp_path, "rb") as audio_file:
@@ -113,13 +163,7 @@ async def chat_voice(
         )
         reply_text = chat_response.choices[0].message.content
 
-        selected_voice = AVAILABLE_VOICES.get(voice, "nova")
-        tts_response = client.audio.speech.create(
-            model="tts-1",
-            voice=selected_voice,
-            input=reply_text,
-        )
-        audio_data = tts_response.content
+        audio_data = elevenlabs_tts(reply_text, gender=voice)
 
     except AuthenticationError:
         raise HTTPException(status_code=401, detail="Invalid OpenAI API key. Check your .env file.")
@@ -145,3 +189,16 @@ async def chat_voice(
 @app.get("/health")
 def health():
     return {"status": "ok", "key_set": bool(api_key)}
+
+
+@app.post("/chat/greet")
+async def chat_greet(gender: str = Form(default="female")):
+    greeting_text = get_greeting(gender)
+    audio_data = elevenlabs_tts(greeting_text, gender=gender)
+
+    def generate():
+        header = json.dumps({"reply_text": greeting_text}).encode("utf-8")
+        yield len(header).to_bytes(4, "big") + header
+        yield audio_data
+
+    return StreamingResponse(generate(), media_type="application/octet-stream")
