@@ -1,0 +1,48 @@
+@import "tailwindcss";
+
+:root {
+  --background: #0d0d14;
+  --foreground: #ffffff;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: "Noto Sans Devanagari", var(--font-geist), Arial, sans-serif;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes bar {
+  0%, 100% { transform: scaleY(0.4); }
+  50%       { transform: scaleY(1); }
+}
+
+@keyframes typing-dot {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30%           { transform: translateY(-5px); opacity: 1; }
+}
+
+.animate-fade-in {
+  animation: fade-in 0.3s ease forwards;
+}
+
+.animate-bar {
+  animation: bar 0.8s ease-in-out infinite;
+  transform-origin: bottom;
+}
+
+.animate-typing-dot {
+  animation: typing-dot 1.2s ease-in-out infinite;
+}
+
+.bg-white\/8 {
+  background-color: rgb(255 255 255 / 0.08);
+}
+
+.border-white\/8 {
+  border-color: rgb(255 255 255 / 0.08);
+}
