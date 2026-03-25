@@ -7,7 +7,7 @@ from openai import OpenAI, AuthenticationError, BadRequestError
 from dotenv import load_dotenv
 import json
 
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), "..", ".env"))
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), ".env"))
 
 app = FastAPI()
 
